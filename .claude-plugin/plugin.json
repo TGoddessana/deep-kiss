@@ -1,7 +1,7 @@
 {
   "name": "deep-kiss",
   "description": "Agent skills for low-parameter models. Trades free generation for structured constraints — fixed decision lenses, mandatory slots, YAGNI/KISS guardrails, and verification mandates — so small models stay in the same KISS region as SOTA. Dig deep, deliver KISS.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "JAEGYUN JUNG",
     "email": "twicegoddessana1229@gmail.com"
