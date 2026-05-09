@@ -1,13 +1,22 @@
 ---
-name: brainstorming
-description: "You MUST use this before any creative work — creating features, building components, adding functionality, or modifying behavior. Explores intent and presents YAGNI/KISS-locked options (4 axes, 5-slot structure) optimized for low-parameter models. Deep-Kiss: dig deep, deliver KISS."
+name: flirt
+description: "You MUST use this before any creative work — creating features, building components, adding functionality, or modifying behavior. Explores intent and presents YAGNI/KISS-locked options (4 axes, 5-slot structure) optimized for low-parameter models. F.L.I.R.T. = Find intent, List axes, Iterate options, Refine slots, Test-spec — the non-committal exploration phase before deep-kiss."
 ---
 
-# Brainstorming Ideas Into Designs (Deep-Kiss)
+# Flirt: 커밋 전의 탐색 (Deep-Kiss 시리즈)
 
-아이디어를 자연스러운 협업 대화를 통해 완성된 설계와 명세로 전환합니다.
+아이디어를 자연스러운 협업 대화를 통해 완성된 설계와 명세로 전환합니다. 본격 커밋(키스/구현) 전의 *비커밋 탐색* 단계.
 
-**Deep-Kiss 의미**: 의도와 제약은 *깊게* 파헤치되, 결과로 내놓는 옵션들은 모두 *KISS 영역 안*에 있어야 한다. 모든 옵션은 작아야 하며, 차이는 "얼마나 큰가"가 아니라 *"어떤 종류의 최소냐"*다.
+**서사**: `flirt` (탐색) → `deep-kiss` (설계 확정) → 구현. 이 스킬은 첫 단계이며, 끝나면 spec 문서를 남기고 `writing-plans`로 넘긴다.
+
+**F.L.I.R.T.** — 5단계 약어 (체크리스트와 일치)
+- **F**ind intent — 의도/제약/성공 기준 파악
+- **L**ist axes — 4축 중 작업에 맞는 1개 선택
+- **I**terate options — 2~3개 KISS-locked 옵션 생성
+- **R**efine slots — 5개 필수 슬롯 채우기 (이름/무엇/트레이드오프+인지부채/언제/검증 테스트)
+- **T**est-spec — spec 문서 작성·셀프 리뷰·사용자 승인
+
+**Deep-Kiss 원칙 (이 시리즈 전체에 적용)**: 의도와 제약은 *깊게* 파헤치되, 결과로 내놓는 옵션들은 모두 *KISS 영역 안*에 있어야 한다. 모든 옵션은 작아야 하며, 차이는 "얼마나 큰가"가 아니라 *"어떤 종류의 최소냐"*다.
 
 먼저 현재 프로젝트 컨텍스트를 이해하고, 한 번에 한 가지씩 질문하여 아이디어를 다듬는다. 무엇을 만드는지 이해하면 설계를 제시하고 사용자 승인을 받는다.
 
@@ -45,7 +54,7 @@ description: "You MUST use this before any creative work — creating features, 
 ## Process Flow
 
 ```dot
-digraph brainstorming {
+digraph flirt {
     "프로젝트 탐색" [shape=box];
     "Trivial?" [shape=diamond];
     "이해 확인 질문\n(코드베이스 근거)" [shape=box];
@@ -79,7 +88,7 @@ digraph brainstorming {
 }
 ```
 
-**최종 상태는 `writing-plans` 호출이다.** `frontend-design`, `mcp-builder` 등 다른 구현 스킬을 호출하지 말 것. brainstorming 다음 *유일한* 스킬은 `writing-plans`.
+**최종 상태는 `writing-plans` 호출이다.** `frontend-design`, `mcp-builder` 등 다른 구현 스킬을 호출하지 말 것. flirt 다음 *유일한* 스킬은 `writing-plans`.
 
 ## Trivial 빠른 경로 (시작 점검)
 
@@ -99,7 +108,7 @@ digraph brainstorming {
 
 - 먼저 현재 프로젝트 상태 확인 (파일·문서·최근 커밋)
 - 자세한 질문 전에 **스코프 평가**: 요청이 여러 독립 서브시스템(예: "채팅 + 파일 저장 + 결제 + 분석을 갖춘 플랫폼")을 묘사하면 즉시 플래그. 분해가 먼저 필요한 프로젝트의 세부사항을 다듬는 데 질문을 낭비하지 않는다.
-- 하나의 spec에 담기 너무 크면 **서브 프로젝트로 분해**: 독립적인 부분은 무엇이고, 어떤 관계이며, 어떤 순서로 만들지. 그 후 첫 서브 프로젝트를 정상 디자인 흐름으로 brainstorm. 각 서브 프로젝트는 자체 spec → plan → implementation 사이클.
+- 하나의 spec에 담기 너무 크면 **서브 프로젝트로 분해**: 독립적인 부분은 무엇이고, 어떤 관계이며, 어떤 순서로 만들지. 그 후 첫 서브 프로젝트를 정상 디자인 흐름으로 flirt. 각 서브 프로젝트는 자체 spec → plan → implementation 사이클.
 - 적절한 스코프의 프로젝트는 한 번에 한 질문으로 다듬기
 - 가능한 한 객관식 질문 선호. 오픈 엔드도 가능
 - 메시지 당 질문 1개. 한 주제가 더 깊은 탐색이 필요하면 여러 질문으로 나눔
