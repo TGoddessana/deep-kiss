@@ -50,7 +50,7 @@ Create a task for each item and complete them in order:
 4. **Propose 2–3 options** — using positions from the chosen axis, with all 5 slots filled
 5. **Present the design** — scale length to complexity, get approval after each section
 6. **Write the design document** — save to `docs/deep-kiss/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review + subagent review** — inline review, then dispatch a Task subagent using the `spec-document-reviewer-prompt.md` template (wait for result)
+7. **Subagent spec review** — dispatch Task subagent using `spec-document-reviewer-prompt.md`; wait for result, fix any issues found
 8. **User spec review** — ask the user to review the written spec
 9. **Transition to implementation** — invoke the `writing-plans` skill
 
@@ -67,7 +67,7 @@ digraph flirt {
     "Present design" [shape=box];
     "Design approved?" [shape=diamond];
     "Write design doc" [shape=box];
-    "Self-review\n(inline fixes)" [shape=box];
+    "Subagent review\n(wait for result)" [shape=box];
     "User spec review?" [shape=diamond];
     "Invoke writing-plans" [shape=doublecircle];
 
@@ -81,8 +81,9 @@ digraph flirt {
     "Present design" -> "Design approved?";
     "Design approved?" -> "Present design" [label="no, revise"];
     "Design approved?" -> "Write design doc" [label="yes"];
-    "Write design doc" -> "Self-review\n(inline fixes)";
-    "Self-review\n(inline fixes)" -> "User spec review?";
+    "Write design doc" -> "Subagent review\n(wait for result)";
+    "Subagent review\n(wait for result)" -> "Write design doc" [label="issues found"];
+    "Subagent review\n(wait for result)" -> "User spec review?" [label="approved"];
     "User spec review?" -> "Write design doc" [label="changes requested"];
     "User spec review?" -> "Invoke writing-plans" [label="approved"];
 }
@@ -250,27 +251,26 @@ If you cannot write one sentence explaining why X is recommended in *this specif
 - Use the `elements-of-style:writing-clearly-and-concisely` skill if available
 - Commit the design document to git
 
-### Spec Self-Review
+### Subagent Spec Review
 
-Review with fresh eyes after writing:
+<HARD-GATE>
+You MUST call the Agent tool to dispatch the reviewer. Do NOT review the spec inline — reading the spec yourself and making edits does not count. The adversarial reviewer must run as a separate agent. Do not proceed to the User Review Gate until the Agent tool call completes and any issues are resolved.
+</HARD-GATE>
 
-1. **Placeholder scan**: any "TBD", "TODO", incomplete sections, or vague requirements? Fix inline.
-2. **Internal consistency**: contradictions between sections? Does the architecture match the feature description?
-3. **Scope check**: focused enough for a single implementation plan? Does it need decomposition?
-4. **Ambiguity check**: any requirement that could be interpreted two different ways? Pick one interpretation and state it explicitly.
-5. **YAGNI/KISS check**: any blacklist keywords remaining in option slots? Is cognitive debt stated in every trade-off? Is each verification test a concrete single sentence?
+Call the **Agent tool** with:
+- `subagent_type`: `"general-purpose"`
+- `description`: `"Adversarial spec review"`
+- `prompt`: the full contents of `spec-document-reviewer-prompt.md` in this directory, with `[SPEC_FILE_PATH]` replaced by the actual spec path
 
-Fix problems inline. No need to re-review — fix and move on.
-
-After the self-review, dispatch a Task subagent using the `spec-document-reviewer-prompt.md` template in the same directory. Fill in `[SPEC_FILE_PATH]` with the path of the written spec. Do not proceed to the next step until the subagent review result is received.
+If the subagent returns issues, fix them in the spec document and call the Agent tool again.
 
 ### User Review Gate
 
-After passing the self-review, ask the user to review the written spec:
+After the subagent approves the spec, ask the user to review it:
 
 > "I've written and committed the spec to `<path>`. Please review it and let me know if anything needs to change before I move on to writing the implementation plan."
 
-Wait for their response. If changes are requested, make them and re-run the self-review. Only proceed after approval.
+Wait for their response. If changes are requested, make them and dispatch the subagent again. Only proceed after approval.
 
 ### Implementation Phase
 
