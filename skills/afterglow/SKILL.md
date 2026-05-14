@@ -144,7 +144,3 @@ Result: skill ×A (paths: ...), memory ×B (file: ...), drop ×C. Scanned N sess
 - Do NOT read raw session transcripts in the main context. Only metadata (mtime, size, message counts via grep) and structured subagent outputs.
 - Do not touch `~/.claude/MEMORY.md` or the auto-memory system. Only `AGENTS.md` / `CLAUDE.md` at the project root are valid memory-file targets.
 - Cache files are session-scoped and append-only; do not delete them on failure.
-
-## Naming note (for series consistency)
-
-`afterglow` continues the romance-themed naming of this plugin (`deep-kiss` → `flirt` → `aftercare` → `afterglow`). The metaphor: aftercare is the immediate post-coital tending; afterglow is the lingering warmth one notices later, when looking back.
