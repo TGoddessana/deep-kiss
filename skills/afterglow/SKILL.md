@@ -46,22 +46,24 @@ If the sessions directory does not exist, print "No prior sessions found for thi
 
 If the substantive set is empty, print "No substantive sessions found for this project." and exit.
 
-### 3. Cache check and dispatch
+### 3. Cache check, compress, and dispatch
 
-For each substantive session file:
+For each substantive session file, with `session_id = <filename without .jsonl>`:
 
-1. Cache key: `<session_id>.yaml` where `session_id` is the filename without extension.
-2. Cache path: `${CACHE_DIR}/<session_id>.yaml`.
-3. If the cache file exists AND `mtime(cache) > mtime(session_jsonl)`, mark as **cached** (Stage 1 output already valid).
-4. Otherwise, mark as **uncached**.
+1. Stage 1 output path: `${CACHE_DIR}/<session_id>.yaml`.
+2. Compressed input path: `${CACHE_DIR}/<session_id>.txt`.
+3. If the Stage 1 output file exists AND `mtime(<id>.yaml) > mtime(<id>.jsonl)`, mark as **cached** — skip.
+4. Otherwise mark as **uncached** and compress the transcript:
+   - Run `bash skills/afterglow/scripts/compress-session.sh <jsonl_path> ${CACHE_DIR}/<session_id>.txt`.
+   - The script produces a plaintext file: `[User]: ...` (≤500 chars), `[Assistant]: ...` (≤300 chars), `[Tool: NAME]` per line. JSONL structure, thinking blocks, and tool_result content are dropped. Typical reduction is 40–50× (a 900KB raw session becomes ~18KB).
 
 Dispatch a Stage 1 harvester subagent for each *uncached* session in parallel (single message with multiple `Agent` tool uses):
 
 - Prompt: body of `skills/afterglow/stage1-harvester-prompt.md`.
-- Input: the session JSONL contents plus `session_id`.
+- Input: `session_id` and the absolute path to the compressed transcript (`${CACHE_DIR}/<session_id>.txt`). The subagent reads that file with the Read tool — the main context never reads transcript content itself.
 - Expected output: YAML matching the Stage 1 schema.
 
-After all harvesters return, write each result to the cache path. Print: `"Harvested N new sessions (M cached)."`
+After all harvesters return, write each result to the Stage 1 output path. Print: `"Harvested N new sessions (M cached)."`
 
 ### 4. Merger dispatch
 
@@ -84,7 +86,22 @@ Drops are listed last in summary form: "Also dropped: <topic> (1 session each)."
 
 ### 6. Process each selected candidate
 
-For each selected candidate, branch on `bucket`:
+For each selected candidate, first **assemble the decisive-excerpt context**:
+
+1. For each entry in `candidate.decisive_excerpts`:
+   - Read `${CACHE_DIR}/<session_id>.txt` with the Read tool, using `offset = line_range[0] - 1` and `limit = line_range[1] - line_range[0] + 1`.
+   - Prefix the result with a header: `### Excerpt — session <session_id[:8]>, lines <start>–<end>`.
+2. Concatenate all excerpts in order. The combined block is the `excerpts_block` (typically <10K tokens for a candidate).
+3. Build `enriched_context_excerpt`:
+   ```
+   <consolidated_detail>
+
+   ## Decisive moments
+
+   <excerpts_block>
+   ```
+
+Then branch on `bucket`:
 
 **memory-file**:
 
@@ -92,7 +109,7 @@ For each selected candidate, branch on `bucket`:
 2. Dispatch a subagent with `skills/aftercare/stage2-memory-drafter-prompt.md` as the prompt. Input fields:
    - `topic`: from candidate
    - `rationale`: candidate's `rationale`
-   - `context_excerpt`: candidate's `consolidated_detail`
+   - `context_excerpt`: `enriched_context_excerpt` (built above)
    - `project_state`: as captured above
 3. Expected output: YAML matching the memory-drafter schema (`target_file`, `operation`, `content`, optionally `section_heading`).
 4. Show the user `target_file`, `operation`, and a preview of `content`. Ask for approval.
@@ -108,7 +125,7 @@ For each selected candidate, branch on `bucket`:
 2. Dispatch a subagent with `skills/aftercare/stage2-skill-drafter-prompt.md` as the prompt. Input fields:
    - `topic`: from candidate
    - `rationale`: candidate's `rationale`
-   - `context_excerpt`: candidate's `consolidated_detail`
+   - `context_excerpt`: `enriched_context_excerpt` (built above)
 3. Expected output: YAML matching the skill-drafter schema (`skill_name`, `files: [{path, content}]`, `notes`).
 4. Show the user the file list, a preview of the first ~30 lines of each file, and `notes`. Ask for approval.
 5. **Approved** → write files to BOTH the Claude Code path and the Codex path for the selected scope. If `.codex/` doesn't exist, mkdir it with a one-line notice. On filename conflict, ask the user: overwrite / rename / skip.
@@ -141,6 +158,7 @@ Result: skill ×A (paths: ...), memory ×B (file: ...), drop ×C. Scanned N sess
 
 - Never trigger automatically — user-explicit invocation only.
 - No direct judgment or drafting in the main context — delegate everything to subagents.
-- Do NOT read raw session transcripts in the main context. Only metadata (mtime, size, message counts via grep) and structured subagent outputs.
+- Do NOT read raw or full compressed transcripts in the main context. Only metadata (mtime, size, message counts via grep) and structured subagent outputs. Compression runs via the helper script and writes straight to the cache file; pass the path to the subagent.
+- **Exception (Step 6 only):** for *accepted* candidates, the main context may read the narrow `decisive_excerpts` line ranges (each ≤50 lines, ≤3 per signal) from the compressed cache to enrich the drafter's `context_excerpt`. This is bounded — typically <10K tokens per accepted candidate, only paid for what the user actually approves.
 - Do not touch `~/.claude/MEMORY.md` or the auto-memory system. Only `AGENTS.md` / `CLAUDE.md` at the project root are valid memory-file targets.
 - Cache files are session-scoped and append-only; do not delete them on failure.
