@@ -1,164 +1,112 @@
 ---
 name: afterglow
-description: "Use when the user invokes /afterglow to retrospectively scan the current project's past Claude Code sessions for repeated user instructions or workflow patterns worth capturing as skills or memory-file entries. Project-scoped (not global). Dispatches one harvester subagent per substantive session in parallel, then a merger subagent to apply the 2-session repetition threshold, then reuses aftercare's drafters to produce SKILL.md bundles or AGENTS.md/CLAUDE.md additions. User-explicit invocation only; do NOT trigger automatically. Do NOT use for capturing a just-fixed mistake — that's aftercare's job."
+description: "Use when the user invokes /afterglow to retrospectively scan the current project's past Claude Code sessions for repeated user corrections or workflow patterns. afterglow is an analyst: it surfaces patterns with verbatim evidence and offers to hand selected candidates to aftercare for capture. afterglow itself does NOT decide bucket, draft skills, or write files. Project-scoped. User-explicit invocation only; do NOT trigger automatically."
 ---
 
-# afterglow — Project-Retrospective Capture
+# afterglow — Retrospective Pattern Surfacer
 
-Series flow: **flirt**(explore) → **deep-kiss**(confirm) → implement → **aftercare**(immediate post-fix) → **afterglow**(retrospective across sessions).
+`aftercare` and `afterglow` are two entry points to the same goal — capturing reusable learning from the project — and differ only in *discovery*:
 
-While `aftercare` captures lessons from a *just-fixed* mistake in the current session, `afterglow` scans the *project's session history* for *repeated* user instructions and workflow patterns. The main context never reads transcripts — judgment and drafting are fully delegated to subagents to respect the <200K context budget.
+- **aftercare**: in-session capture, using the rich current conversation context.
+- **afterglow**: retrospective scan across past sessions, surfacing patterns that repeated across runs.
+
+afterglow finds candidates and presents them with evidence. It then asks whether to hand the selected ones to `aftercare`, which owns the judgment (skill / memory-file / drop) and the drafting. afterglow itself never drafts and never writes files.
 
 ## When to use
 
-- When the user explicitly invokes `/afterglow`.
-- Never trigger automatically.
-- Do NOT use for in-session mistake capture — use `aftercare` instead.
+- The user explicitly invokes `/afterglow`. Never auto-trigger.
+- For in-session capture of a just-fixed mistake, use `aftercare` instead.
 
-## Outputs (3 buckets, inherited from aftercare)
-
-- `skill`: write a new skill file (SKILL.md + optional `scripts/`, `references/`)
-- `memory-file`: a short addition to `AGENTS.md` or `CLAUDE.md` at the project root
-- `drop`: not worth capturing — do nothing
-
-## Orchestration Checklist
-
-Execute in order. Each step is short; the main context handles only dispatch and user interaction.
+## Orchestration
 
 ### 1. Compute paths
 
 1. Get the current working directory: `pwd`.
-2. Encode as a project path: replace every `/` with `-`. Example: `/Users/x/y` → `-Users-x-y`.
-3. Determine the Claude config base: `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`.
-4. Sessions directory: `${BASE}/projects/${ENCODED}`.
-5. Cache directory: `${BASE}/afterglow/${ENCODED}`. Create it if absent: `mkdir -p`.
+2. Encode it as a project path: replace every `/` with `-`. Example: `/Users/x/y` → `-Users-x-y`.
+3. Resolve the Claude config base: `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`.
+4. `SESSIONS_DIR = ${BASE}/projects/${ENCODED}`.
+5. `CACHE_DIR = ${BASE}/afterglow/${ENCODED}`. Create it if absent: `mkdir -p`.
 
-If the sessions directory does not exist, print "No prior sessions found for this project." and exit.
+If `SESSIONS_DIR` does not exist, print "No prior sessions found for this project." and exit.
 
-### 2. List substantive sessions
+### 2. List recent substantive sessions
 
-1. List all `*.jsonl` files in the sessions directory.
-2. For each file, compute a cheap substantive check via Bash:
-   - User-message count: `grep -c '"type":"user"' <file>`
-   - File size: `wc -c <file>`
-3. Skip files with `user_message_count < 2` OR `size < 4096` bytes (≈ 1 minute of activity).
-4. The remaining list is the **substantive session set** for this run.
+Call the bundled helper script in a single Bash invocation (path is relative to this skill's root):
 
-If the substantive set is empty, print "No substantive sessions found for this project." and exit.
-
-### 3. Cache check, compress, and dispatch
-
-For each substantive session file, with `session_id = <filename without .jsonl>`:
-
-1. Stage 1 output path: `${CACHE_DIR}/<session_id>.yaml`.
-2. Compressed input path: `${CACHE_DIR}/<session_id>.txt`.
-3. If the Stage 1 output file exists AND `mtime(<id>.yaml) > mtime(<id>.jsonl)`, mark as **cached** — skip.
-4. Otherwise mark as **uncached** and compress the transcript:
-   - Run `bash skills/afterglow/scripts/compress-session.sh <jsonl_path> ${CACHE_DIR}/<session_id>.txt`.
-   - The script produces a plaintext file: `[User]: ...` (≤500 chars), `[Assistant]: ...` (≤300 chars), `[Tool: NAME]` per line. JSONL structure, thinking blocks, and tool_result content are dropped. Typical reduction is 40–50× (a 900KB raw session becomes ~18KB).
-
-Dispatch a Stage 1 harvester subagent for each *uncached* session in parallel (single message with multiple `Agent` tool uses):
-
-- Prompt: body of `skills/afterglow/stage1-harvester-prompt.md`.
-- Input: `session_id` and the absolute path to the compressed transcript (`${CACHE_DIR}/<session_id>.txt`). The subagent reads that file with the Read tool — the main context never reads transcript content itself.
-- Expected output: YAML matching the Stage 1 schema.
-
-After all harvesters return, write each result to the Stage 1 output path. Print: `"Harvested N new sessions (M cached)."`
-
-### 4. Merger dispatch
-
-1. Load all Stage 1 outputs (cached + freshly written) — concatenate as the `sessions` field of the merger input.
-2. Dispatch a Stage 2 merger subagent with `skills/afterglow/stage2-merger-prompt.md` as the prompt.
-3. Result: candidate list with `topic / bucket / count / sessions / signal_kind / rationale / consolidated_detail`.
-
-### 5. Present candidates and user selection
-
-- 0 candidates with bucket ≠ drop → "No repeated patterns found. (Scanned N sessions.)" Exit.
-- 1 candidate (non-drop) → show it (topic, bucket, count, rationale), ask "Shall we proceed?"
-- N candidates (non-drop) → present a numbered list, format:
-  ```
-  1. [memory-file ×3] Don't wrap internal code in defensive try/except
-  2. [skill ×2] Run pytest verification after each edit
-  ```
-  Ask: "Which would you like to process? (all / number list / cancel)"
-
-Drops are listed last in summary form: "Also dropped: <topic> (1 session each)." No further action.
-
-### 6. Process each selected candidate
-
-For each selected candidate, first **assemble the decisive-excerpt context**:
-
-1. For each entry in `candidate.decisive_excerpts`:
-   - Read `${CACHE_DIR}/<session_id>.txt` with the Read tool, using `offset = line_range[0] - 1` and `limit = line_range[1] - line_range[0] + 1`.
-   - Prefix the result with a header: `### Excerpt — session <session_id[:8]>, lines <start>–<end>`.
-2. Concatenate all excerpts in order. The combined block is the `excerpts_block` (typically <10K tokens for a candidate).
-3. Build `enriched_context_excerpt`:
-   ```
-   <consolidated_detail>
-
-   ## Decisive moments
-
-   <excerpts_block>
-   ```
-
-Then branch on `bucket`:
-
-**memory-file**:
-
-1. Check whether `AGENTS.md` and `CLAUDE.md` exist at the project root. If either exists, capture top-level section headings (lines starting with `## `) as `project_state`.
-2. Dispatch a subagent with `skills/aftercare/stage2-memory-drafter-prompt.md` as the prompt. Input fields:
-   - `topic`: from candidate
-   - `rationale`: candidate's `rationale`
-   - `context_excerpt`: `enriched_context_excerpt` (built above)
-   - `project_state`: as captured above
-3. Expected output: YAML matching the memory-drafter schema (`target_file`, `operation`, `content`, optionally `section_heading`).
-4. Show the user `target_file`, `operation`, and a preview of `content`. Ask for approval.
-5. **Approved** → if `target_file` does not exist at project root, create it (one-line notice). Then append or insert into the specified section.
-6. **Rejected with feedback** → re-dispatch (max 2 attempts total). On exceeding the limit, show the last raw output and ask the user to handle it manually.
-
-**skill**:
-
-1. Ask the user a scope question:
-   > "Where would you like to install this skill?
-   > (1) project — `./.claude/skills/<name>/` + `./.codex/skills/<name>/`
-   > (2) user — `~/.claude/skills/<name>/` + `~/.codex/skills/<name>/`"
-2. Dispatch a subagent with `skills/aftercare/stage2-skill-drafter-prompt.md` as the prompt. Input fields:
-   - `topic`: from candidate
-   - `rationale`: candidate's `rationale`
-   - `context_excerpt`: `enriched_context_excerpt` (built above)
-3. Expected output: YAML matching the skill-drafter schema (`skill_name`, `files: [{path, content}]`, `notes`).
-4. Show the user the file list, a preview of the first ~30 lines of each file, and `notes`. Ask for approval.
-5. **Approved** → write files to BOTH the Claude Code path and the Codex path for the selected scope. If `.codex/` doesn't exist, mkdir it with a one-line notice. On filename conflict, ask the user: overwrite / rename / skip.
-6. **Rejected with feedback** → re-dispatch (max 2 attempts total). On exceeding the limit, show the last raw output and ask the user to handle it manually.
-
-**drop**: One-line notice: "Not recording — reason: <rationale>." Move on.
-
-### 7. Closing summary
-
-When a single `/afterglow` invocation is fully processed, print:
 ```
-Result: skill ×A (paths: ...), memory ×B (file: ...), drop ×C. Scanned N sessions (M harvested fresh, K from cache).
+bash scripts/list-substantive-sessions.sh "${SESSIONS_DIR}"
 ```
+
+The script sorts by mtime descending, drops sessions with `user_message_count < 2` OR `size < 4096` bytes, and caps the output at the **most recent 50** by default. Override with `--limit N` (or `--limit 0` for unlimited) only when the user explicitly asks for a wider scan.
+
+**Do NOT inline this as a shell loop** (`cd ~/.claude/projects/<encoded> && for f in *.jsonl ...` or any `for`/`while` over the sessions directory with `grep`/`wc` substitutions). Auto-mode permission classifier blocks those patterns. Always go through the helper.
+
+If the output is empty, print "No substantive sessions found for this project." and exit.
+
+### 3. Ensure compressed transcripts are cached
+
+For each session path, with `session_id = <filename without .jsonl>`:
+
+1. Target: `${CACHE_DIR}/<session_id>.txt`.
+2. If the target exists AND its mtime is newer than the source `.jsonl`, mark as **cached** — skip compression.
+3. Otherwise run `bash scripts/compress-session.sh <jsonl_path> ${CACHE_DIR}/<session_id>.txt`. The script writes `[User]: ...` / `[Assistant]: ...` / `[Tool: NAME]` lines (typical reduction 40–50×).
+
+Print a one-line summary: `"Compressed N new (M cached)."`
+
+### 4. Dispatch the analyst
+
+Dispatch a single subagent (one `Agent` tool use):
+
+- **Prompt**: body of `analyst-prompt.md`.
+- **Input**: a list of `(session_id, transcript_path)` pairs covering the substantive set. The subagent will `Read` each `.txt` itself — the main context never reads transcript content.
+- **Expected output**: YAML matching the analyst schema (`sessions_scanned`, `candidates`, `also_seen`).
+
+Parse the YAML. On parse failure, re-dispatch once with a structure-correction note. If it still fails, print the raw output and ask the user how to proceed.
+
+### 5. Present candidates
+
+- `candidates: []` → "No repeated patterns found across N sessions." Print `also_seen` topics as a one-liner if any (for transparency). Exit.
+- Otherwise, for each candidate, render:
+
+  ```
+  N. [×<count>] <topic>
+     Evidence:
+       • "<verbatim quote>"  (session <id[:8]>)
+       • "<verbatim quote>"  (session <id[:8]>)
+     Pattern: <detail>
+  ```
+
+- After the list, if `also_seen` is non-empty, append one line: `"Also seen once each: <topic>, <topic>, ..."` (truncate to ~5).
+
+### 6. Offer hand-off to aftercare
+
+Ask the user:
+
+> "캡처할 패턴이 있나요? aftercare를 트리거하면 메모리/스킬로 만들 수 있습니다.
+> 선택: (숫자 / all / no)"
+
+Branches:
+
+- **`no` or cancel** → "OK. /aftercare 직접 호출하셔도 됩니다." Exit cleanly. No files written.
+- **숫자 / `all`** → Echo the selection back in plain text so it becomes part of the conversation context: `"선택된 패턴: 1, 3 — aftercare로 넘깁니다."` Then invoke `Skill(aftercare)` so its stage-1 judge picks up the presented candidates from the conversation. afterglow's job ends here; the rest is aftercare's flow.
+- **`Skill(aftercare)` unavailable or fails** → Fall back to printing `"/aftercare 를 다음 메시지로 호출해주세요."` while keeping the candidate list on screen. Same destination either way.
 
 ## Errors / Edge Cases
 
 | Situation | Handling |
 |-----------|----------|
-| Sessions directory missing | "No prior sessions found for this project." Exit. |
-| Substantive set empty | "No substantive sessions found for this project." Exit. |
-| Stage 1 (harvester) output parse failure on one session | Skip that session, log a one-line warning, continue. |
-| Stage 2 (merger) output parse failure | Re-dispatch once with structure-correction note. If it still fails, show raw output and ask the user to decide. |
-| Drafter parse failure or user rejection | Up to 2 total retries (attach feedback/error). Then raw output + manual handoff. |
-| Rejection with no feedback | Ask "What should be changed?" once; if no response, skip. |
-| Filename conflict (skill) | User chooses: overwrite / rename / skip. |
-| `.codex/` directory absent | mkdir + one-line notice. |
-| Cache directory creation fails | Print warning, proceed without caching (re-runs will reharvest). |
+| `SESSIONS_DIR` missing | Step 1: "No prior sessions found for this project." Exit. |
+| Substantive set empty | Step 2: "No substantive sessions found for this project." Exit. |
+| Single compression failure | Log a one-line warning, continue with the remaining sessions. |
+| Analyst YAML parse failure | Re-dispatch once with a correction note. If still bad: show raw output, ask user. |
+| Zero candidates | Step 5: clean exit, with `also_seen` summary if any. |
+| User rejects hand-off | Step 6: clean exit, no writes. |
+| `Skill(aftercare)` chaining unsupported | Step 6: fall back to "type `/aftercare` next". |
 
 ## Constraints
 
-- Never trigger automatically — user-explicit invocation only.
-- No direct judgment or drafting in the main context — delegate everything to subagents.
-- Do NOT read raw or full compressed transcripts in the main context. Only metadata (mtime, size, message counts via grep) and structured subagent outputs. Compression runs via the helper script and writes straight to the cache file; pass the path to the subagent.
-- **Exception (Step 6 only):** for *accepted* candidates, the main context may read the narrow `decisive_excerpts` line ranges (each ≤50 lines, ≤3 per signal) from the compressed cache to enrich the drafter's `context_excerpt`. This is bounded — typically <10K tokens per accepted candidate, only paid for what the user actually approves.
-- Do not touch `~/.claude/MEMORY.md` or the auto-memory system. Only `AGENTS.md` / `CLAUDE.md` at the project root are valid memory-file targets.
-- Cache files are session-scoped and append-only; do not delete them on failure.
+- **User-explicit invocation only.** Never auto-trigger.
+- **No drafting in afterglow.** It does not write skills, memory entries, or any files under `.claude/skills/`, `AGENTS.md`, `CLAUDE.md`, or `~/.claude/MEMORY.md`. That work belongs to `aftercare`.
+- **No bucket decision in afterglow.** aftercare's 4-criteria judge owns skill / memory-file / drop.
+- **Main context never reads transcripts.** Only metadata (mtime/size/grep counts via the helper script) and the analyst's structured YAML output enter the main context.
+- Compressed `.txt` cache is append-only; do not delete on failure. Stale `.yaml` files from previous afterglow versions in the cache directory are harmless — leave them.
