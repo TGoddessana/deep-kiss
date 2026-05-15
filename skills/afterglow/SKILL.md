@@ -66,15 +66,23 @@ Parse the YAML. On parse failure, re-dispatch once with a structure-correction n
 ### 5. Present candidates
 
 - `candidates: []` → "No repeated patterns found across N sessions." Print `also_seen` topics as a one-liner if any (for transparency). Exit.
-- Otherwise, for each candidate, render:
+- Otherwise, for each candidate, render the `kind` field and its suggested bucket so the user (and downstream `aftercare`) sees the analyst's tag:
 
   ```
   N. [×<count>] <topic>
+     Kind: <kind>  →  suggested bucket: <skill | CLAUDE.md>
      Evidence:
        • "<verbatim quote>"  (session <id[:8]>)
        • "<verbatim quote>"  (session <id[:8]>)
      Pattern: <detail>
   ```
+
+  Bucket-hint mapping:
+  - `repeated_task_kickoff` → skill
+  - `multi_step_procedure` → skill
+  - `convention_correction` → CLAUDE.md
+
+  The hint is a **suggestion**, not a decision. `aftercare`'s 4-criteria judge still owns the final routing (skill / memory-file / drop).
 
 - After the list, if `also_seen` is non-empty, append one line: `"Also seen once each: <topic>, <topic>, ..."` (truncate to ~5).
 
