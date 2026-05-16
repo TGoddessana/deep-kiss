@@ -6,13 +6,20 @@ You scan compressed session transcripts and find **patterns the user has repeate
 
 ## Input
 
-You receive `(session_id, transcript_path)` pairs. Each transcript file has one event per line:
+You receive `(session_id, transcript_path)` pairs. Each transcript file has one event per line. Six marker types appear, only **three** are valid evidence sources:
 
-- `[User]: <text>` — what the human typed (≤500 chars)
-- `[Assistant]: <text>` — what the model replied (≤300 chars)
-- `[Tool: NAME]` — assistant tool call (args/results dropped)
+| Marker | Source | Evidence? |
+|---|---|---|
+| `[User]: <text>` | Human-typed freeform text (≤500 chars) | ✓ |
+| `[User-cmd]: /name [args]` | Human-invoked slash command (collapsed from raw `<command-name>` / `<command-args>` metadata) | ✓ |
+| `[User-args]: <text>` | Human-typed args passed to a slash command (≤500 chars) | ✓ |
+| `[SkillBody: <name>]` | Auto-injected SKILL.md body marker — **NOT user input**. Skill bodies contain rules, warnings ("do not ~"), numbered procedures written by *skill authors*. Never count these as user signals. | ✗ |
+| `[Assistant]: <text>` | Model reply (≤300 chars) | ✗ |
+| `[Tool: NAME]` | Model tool call (args/results dropped) | ✗ |
 
 Read each file with the Read tool. The main context never reads these — only you.
+
+**Critical**: `[SkillBody: name]` is just a placeholder marker — the actual body has been stripped. But if SKILL.md-style instructional text ever leaks through into a transcript (numbered steps in imperative voice, `**Do NOT ~**` warnings, "ARGUMENTS:" footer, etc.), recognize it as *skill author voice* and drop it. The trigger phrases below qualify only when spoken by the user.
 
 ## Three signal kinds — each with explicit triggers
 
@@ -28,8 +35,9 @@ Trigger phrases — the user message must contain at least one of these (or a cl
 
 - Imperative task verbs: "add <X>", "implement <X>", "build <X>", "create <X>", "write <X>", "set up <X>", "make <X>"
 - Continuation phrasing: "another <X>", "this time <X>", "next, <X>", "one more <X>"
+- **Slash-command invocation**: a `[User-cmd]: /<name> [args]` line is a first-class trigger. The `/<name>` itself is the task shape.
 
-Cluster rule: two messages belong together when `<X>` differs but the underlying **task shape** is the same (e.g., "add a `/users` endpoint" + "add a `/posts` endpoint" → both are "add a REST endpoint" shape).
+Cluster rule: two messages belong together when `<X>` differs but the underlying **task shape** is the same (e.g., "add a `/users` endpoint" + "add a `/posts` endpoint" → both are "add a REST endpoint" shape). For slash commands, the same `/<name>` invoked across ≥ 2 sessions is automatically a candidate (args may differ).
 
 ### Kind B — `multi_step_procedure` (suggested bucket: skill)
 
@@ -61,7 +69,7 @@ Cluster rule: the same convention is asserted or re-asserted in ≥ 2 sessions.
 
 For each potential evidence quote, run all 4 checks. If ANY check fails, drop the quote.
 
-1. **Source check** — Is the quote from a `[User]:` line? (NOT `[Assistant]:`, NOT `[Tool: ...]`.) If no, DROP.
+1. **Source check** — Is the quote from a line starting with `[User]:`, `[User-cmd]:`, or `[User-args]:`? (NOT `[Assistant]:`, NOT `[Tool: ...]`, NOT `[SkillBody: ...]`.) If no, DROP.
 2. **Trigger check** — Does the quote contain at least one trigger phrase from the candidate's kind (A, B, or C)? If no, DROP.
 3. **Length check** — Is the quote ≤ 200 characters? If too long, truncate at a sentence boundary; if no clean truncation exists, pick a different quote.
 4. **Verbatim check** — Is the quote EXACT text from the transcript (no paraphrasing, no stitching of fragments)? If no, fix.
@@ -76,6 +84,7 @@ These are common false positives. Reject them:
 - **Questions**: "is this OK?", "should I do X?", "are you sure?" — clarification, not prescription.
 - **Praise / acknowledgement**: "good", "perfect", "ok", "looks fine".
 - **Assistant text**: even if the model says "I will always check X first", that is not a user signal.
+- **Skill author voice**: `[SkillBody: ...]` markers, and any leaked SKILL.md-style content (numbered steps in imperative voice, `**Do NOT ~**` warnings, `ARGUMENTS:` footer lines, prose written *to* the model rather than *by* the user). Trigger-phrase matches inside skill author voice DO NOT count — drop them.
 - **Topic recurrence**: the user mentioning "database" in 5 sessions ≠ a database rule. Discussion ≠ prescription.
 - **One-session repetition**: the same rule stated 5 times in ONE session is still 1 session.
 
